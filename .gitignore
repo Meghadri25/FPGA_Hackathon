@@ -1,0 +1,31 @@
+# Large data files
+data/LD2011_2014.txt
+
+# Model checkpoints (if large)
+*.pt
+
+# Temporary files
+*.tmp
+*.log
+
+# Vivado project files
+*.xpr
+*.hw
+*.sim
+*.cache
+*.ip_user_files
+*.runs
+*.sdk
+
+# Simulation outputs
+*.vcd
+*.wdb
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# OS files
+.DS_Store
+Thumbs.db
