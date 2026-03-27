@@ -2,145 +2,165 @@
 
 module nn_tb;
 
-// Test bench for nn_combined module
+    logic clk;
+    logic rst;
+    logic [2:0] model_select;
+    logic start;
 
-reg clk;
-reg rst;
-reg [2:0] model_select;
-reg start;
-reg signed [15:0] features [0:23];
-wire signed [15:0] h1_out;
-wire signed [15:0] h4_out;
-wire done;
+    logic signed [15:0] features [0:23];
+    logic signed [383:0] features_flat;
 
-// Instantiate the module
-nn_combined dut (
-    .clk(clk),
-    .rst(rst),
-    .model_select(model_select),
-    .start(start),
-    .features(features),
-    .h1_out(h1_out),
-    .h4_out(h4_out),
-    .done(done)
-);
+    logic signed [15:0] h1_out;
+    logic signed [15:0] h4_out;
+    logic done;
 
-// Clock generation
-always #5 clk = ~clk;  // 100MHz clock
+    nn_combined dut (
+        .clk(clk),
+        .rst(rst),
+        .model_select(model_select),
+        .start(start),
+        .features_flat(features_flat),
+        .h1_out(h1_out),
+        .h4_out(h4_out),
+        .done(done)
+    );
 
-// Several test input vectors (Q8.8 fixed-point) for broader coverage
-reg signed [15:0] test_vectors [0:3][0:23];
-reg signed [15:0] out_h1 [0:4][0:3];
-reg signed [15:0] out_h4 [0:4][0:3];
+    always #5 clk = ~clk;
 
-initial begin
-    // vector 0: sample from data
-    test_vectors[0][0]  = 16'd17278; test_vectors[0][1]  = 16'd17222; test_vectors[0][2]  = 16'd18900; test_vectors[0][3]  = 16'd21472;
-    test_vectors[0][4]  = 16'd20689; test_vectors[0][5]  = 16'd21863; test_vectors[0][6]  = 16'd22255; test_vectors[0][7]  = 16'd21025;
-    test_vectors[0][8]  = 16'd21640; test_vectors[0][9]  = 16'd22926; test_vectors[0][10] = 16'd21528; test_vectors[0][11] = 16'd24044;
-    test_vectors[0][12] = 16'd23317; test_vectors[0][13] = 16'd21472; test_vectors[0][14] = 16'd23205; test_vectors[0][15] = 16'd25442;
-    test_vectors[0][16] = 16'd18668; test_vectors[0][17] = 16'd22761; test_vectors[0][18] = 16'd7306;  test_vectors[0][19] = 16'd12143;
-    test_vectors[0][20] = 16'd32209; test_vectors[0][21] = 16'd3245;  test_vectors[0][22] = 16'd26277; test_vectors[0][23] = 16'd32767;
+    logic signed [15:0] test_vectors [0:3][0:23];
+    logic signed [15:0] out_h1 [0:4][0:3];
+    logic signed [15:0] out_h4 [0:4][0:3];
 
-    // vector 1: relatively low values
-    test_vectors[1][0]  = 16'd1000;  test_vectors[1][1]  = 16'd1200;  test_vectors[1][2]  = 16'd1100;  test_vectors[1][3]  = 16'd900;
-    test_vectors[1][4]  = 16'd1400;  test_vectors[1][5]  = 16'd1300;  test_vectors[1][6]  = 16'd1250;  test_vectors[1][7]  = 16'd1350;
-    test_vectors[1][8]  = 16'd1450;  test_vectors[1][9]  = 16'd1550;  test_vectors[1][10] = 16'd1600;  test_vectors[1][11] = 16'd1650;
-    test_vectors[1][12] = 16'd1700;  test_vectors[1][13] = 16'd1800;  test_vectors[1][14] = 16'd1900;  test_vectors[1][15] = 16'd2000;
-    test_vectors[1][16] = 16'd2100;  test_vectors[1][17] = 16'd2200;  test_vectors[1][18] = 16'd2300;  test_vectors[1][19] = 16'd2400;
-    test_vectors[1][20] = 16'd2500;  test_vectors[1][21] = 16'd2600;  test_vectors[1][22] = 16'd2700;  test_vectors[1][23] = 16'd2800;
+    logic signed [15:0] expected_h1 [0:4][0:3];
+    logic signed [15:0] expected_h4 [0:4][0:3];
 
-    // vector 2: mid-range constant value
-    integer ii;
-    for (ii = 0; ii < 24; ii = ii + 1) begin
-        test_vectors[2][ii] = 16'd16000;
-    end
+    int ii;
+    int model_idx;
+    int vec_idx;
+    int cycle_count;
+    bit tests_ok;
 
-    // vector 3: high values near upper tied to Q8.8 range
-    for (ii = 0; ii < 24; ii = ii + 1) begin
-        test_vectors[3][ii] = 16'd30000;
-    end
-end
-
-initial begin
-    // Initialize
-    clk = 0;
-    rst = 1;
-    start = 0;
-
-    integer model_idx;
-    integer vec_idx;
-    reg [31:0] cycle_count;
-    reg tests_ok;
-
-    tests_ok = 1;
-    #10 rst = 0;
-
-    for (model_idx = 0; model_idx < 5; model_idx = model_idx + 1) begin
-        model_select = model_idx;
-
-        for (vec_idx = 0; vec_idx < 4; vec_idx = vec_idx + 1) begin
-            // Load vector
-            for (ii = 0; ii < 24; ii = ii + 1) begin
-                features[ii] = test_vectors[vec_idx][ii];
+    task automatic load_features(input int vec);
+        begin
+            for (ii = 0; ii < 24; ii++) begin
+                features[ii] = test_vectors[vec][ii];
+                features_flat[ii*16 +: 16] = test_vectors[vec][ii];
             end
-
-            // Start inference
-            start = 1;
-            #10 start = 0;
-
-            // Wait for done with timeout
-            cycle_count = 0;
-            while (!done && cycle_count < 5000) begin
-                @(posedge clk);
-                cycle_count = cycle_count + 1;
-            end
-
-            if (!done) begin
-                $display("ERROR: model %0d vector %0d did not finish (timeout)", model_idx, vec_idx);
-                tests_ok = 0;
-                disable all_done;
-            end
-
-            // Save outputs
-            out_h1[model_idx][vec_idx] = h1_out;
-            out_h4[model_idx][vec_idx] = h4_out;
-
-            // Basic bounds checks
-            if (h1_out < -32768 || h1_out > 32767 || h4_out < -32768 || h4_out > 32767) begin
-                $display("ERROR: output out-of-range model %0d vector %0d h1=%0d h4=%0d", model_idx, vec_idx, h1_out, h4_out);
-                tests_ok = 0;
-            end
-
-            $display("Model %0d Vector %0d : h1=%0d h4=%0d", model_idx, vec_idx, h1_out, h4_out);
-
-            // Ensure output varies with input patterns
-            if (vec_idx > 0 && h1_out == out_h1[model_idx][0] && h4_out == out_h4[model_idx][0]) begin
-                $display("WARNING: model %0d output unchanged for vector %0d", model_idx, vec_idx);
-            end
-
-            // small pause before next run
-            #10;
         end
+    endtask
+
+    initial begin
+        clk = 0;
+        rst = 1;
+        start = 0;
+        model_select = 0;
+        tests_ok = 1;
+
+        for (ii = 0; ii < 24; ii++) begin
+            features[ii] = '0;
+            features_flat[ii*16 +: 16] = '0;
+        end
+
+        // Expected outputs
+        expected_h1[0] = '{16'd16749, 16'd1279, 16'd14194, 16'd25969};
+        expected_h1[1] = '{16'd13687, 16'd1043, 16'd11300, 16'd18407};
+        expected_h1[2] = '{16'd13774, 16'd905,  16'd11747, 16'd20742};
+        expected_h1[3] = '{16'd3972,  16'd37,   16'd3991,  16'd7287};
+        expected_h1[4] = '{16'd17391, 16'd1492, 16'd12697, 16'd21160};
+
+        expected_h4[0] = '{16'd14145, 16'd1131, 16'd12383, 16'd21965};
+        expected_h4[1] = '{16'd13697, 16'd1006, 16'd11162, 16'd19315};
+        expected_h4[2] = '{16'd13995, 16'd963,  16'd12052, 16'd21064};
+        expected_h4[3] = '{16'd6177,  16'd353,  16'd6001,  16'd10974};
+        expected_h4[4] = '{16'd17360, 16'd1467, 16'd12762, 16'd21787};
+
+        // vector 0
+        test_vectors[0] = '{
+            16'd17278, 16'd17222, 16'd18900, 16'd21472,
+            16'd20689, 16'd21863, 16'd22255, 16'd21025,
+            16'd21640, 16'd22926, 16'd21528, 16'd24044,
+            16'd23317, 16'd21472, 16'd23205, 16'd25442,
+            16'd18668, 16'd22761, 16'd7306,  16'd12143,
+            16'd32209, 16'd3245,  16'd26277, 16'd32767
+        };
+
+        // vector 1
+        test_vectors[1] = '{
+            16'd1000, 16'd1200, 16'd1100, 16'd900,
+            16'd1400, 16'd1300, 16'd1250, 16'd1350,
+            16'd1450, 16'd1550, 16'd1600, 16'd1650,
+            16'd1700, 16'd1800, 16'd1900, 16'd2000,
+            16'd2100, 16'd2200, 16'd2300, 16'd2400,
+            16'd2500, 16'd2600, 16'd2700, 16'd2800
+        };
+
+        // vector 2
+        for (ii = 0; ii < 24; ii++) begin
+            test_vectors[2][ii] = 16'd16000;
+        end
+
+        // vector 3
+        for (ii = 0; ii < 24; ii++) begin
+            test_vectors[3][ii] = 16'd30000;
+        end
+
+        repeat (5) @(posedge clk);
+        rst = 0;
     end
 
-    // compare across models for vector 0
-    if (out_h1[0][0] == out_h1[1][0] && out_h1[1][0] == out_h1[2][0] && out_h1[2][0] == out_h1[3][0] && out_h1[3][0] == out_h1[4][0]) begin
-        $display("WARNING: h1 outputs identical for all models on vector 0");
-    end
+    initial begin
+        wait(rst == 0);
+        @(posedge clk);
 
-    if (out_h4[0][0] == out_h4[1][0] && out_h4[1][0] == out_h4[2][0] && out_h4[2][0] == out_h4[3][0] && out_h4[3][0] == out_h4[4][0]) begin
-        $display("WARNING: h4 outputs identical for all models on vector 0");
-    end
+        for (model_idx = 0; model_idx < 5; model_idx++) begin
+            model_select = model_idx[2:0];
 
-    if (tests_ok) begin
-        $display("ALL TESTS PASSED");
-    end else begin
-        $display("SOME TESTS FAILED");
-    end
+            for (vec_idx = 0; vec_idx < 4; vec_idx++) begin
+                load_features(vec_idx);
 
-    ::all_done:;
-    $finish;
-end
+                @(negedge clk);
+                start = 1'b1;
+                @(negedge clk);
+                start = 1'b0;
+
+                cycle_count = 0;
+                while ((done !== 1'b1) && (cycle_count < 7000)) begin
+                    @(posedge clk);
+                    cycle_count++;
+                end
+
+                if (done !== 1'b1) begin
+                    $display("ERROR: model %0d vector %0d timeout", model_idx, vec_idx);
+                    tests_ok = 0;
+                end else begin
+                    out_h1[model_idx][vec_idx] = h1_out;
+                    out_h4[model_idx][vec_idx] = h4_out;
+
+                    if (h1_out !== expected_h1[model_idx][vec_idx] ||
+                        h4_out !== expected_h4[model_idx][vec_idx]) begin
+                        $display("ERROR: model %0d vec %0d mismatch | exp h1=%0d h4=%0d | got h1=%0d h4=%0d",
+                            model_idx, vec_idx,
+                            expected_h1[model_idx][vec_idx],
+                            expected_h4[model_idx][vec_idx],
+                            h1_out, h4_out);
+                        tests_ok = 0;
+                    end
+
+                    $display("Model %0d Vector %0d : h1=%0d h4=%0d",
+                        model_idx, vec_idx, h1_out, h4_out);
+                end
+
+                wait(done == 1'b0);
+                #10;
+            end
+        end
+
+        if (tests_ok)
+            $display("ALL TESTS PASSED");
+        else
+            $display("SOME TESTS FAILED");
+
+        $finish;
+    end
 
 endmodule
