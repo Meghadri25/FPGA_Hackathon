@@ -14,6 +14,8 @@ module nn_tb;
     logic signed [15:0] h4_out;
     logic done;
 
+    logic [3:0] state_out;
+
     nn_combined dut (
         .clk(clk),
         .rst(rst),
@@ -22,7 +24,8 @@ module nn_tb;
         .features_flat(features_flat),
         .h1_out(h1_out),
         .h4_out(h4_out),
-        .done(done)
+        .done(done),
+        .state_out(state_out)
     );
 
     always #5 clk = ~clk;
@@ -118,15 +121,21 @@ module nn_tb;
             for (vec_idx = 0; vec_idx < 4; vec_idx++) begin
                 load_features(vec_idx);
 
-                @(negedge clk);
+                @(posedge clk);
                 start = 1'b1;
-                @(negedge clk);
+                @(posedge clk);
                 start = 1'b0;
 
                 cycle_count = 0;
-                while ((done !== 1'b1) && (cycle_count < 7000)) begin
+                @(posedge clk); // allow state machine to start
+                $display("model=%0d vec=%0d start asserted, state=%0d", model_idx, vec_idx, state_out);
+
+                while ((done !== 1'b1) && (cycle_count < 20000)) begin
                     @(posedge clk);
                     cycle_count++;
+                    if (cycle_count % 5000 == 0) begin
+                        $display("still running model=%0d vec=%0d cycle=%0d state=%0d", model_idx, vec_idx, cycle_count, state_out);
+                    end
                 end
 
                 if (done !== 1'b1) begin

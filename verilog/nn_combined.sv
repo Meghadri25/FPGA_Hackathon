@@ -8,7 +8,8 @@ module nn_combined (
     input  logic signed [383:0] features_flat,   // 24 x 16-bit packed, feature[0] at [15:0]
     output logic signed [15:0] h1_out,
     output logic signed [15:0] h4_out,
-    output logic done
+    output logic done,
+    output logic [3:0] state_out
 );
 
     // ---------------- BRAM INTERFACE ----------------
@@ -16,19 +17,19 @@ module nn_combined (
     logic [13:0]        bram_addr;
     logic               bram_en;
 
-    bram_16x13602 #(.FILE_NAME("weights_196.hex")) bram0 (
+    bram_16x13602 #(.MODEL_ID(196)) bram0 (
         .clka(clk), .ena(bram_en), .addra(bram_addr), .douta(bram_dout[0])
     );
-    bram_16x13602 #(.FILE_NAME("weights_279.hex")) bram1 (
+    bram_16x13602 #(.MODEL_ID(279)) bram1 (
         .clka(clk), .ena(bram_en), .addra(bram_addr), .douta(bram_dout[1])
     );
-    bram_16x13602 #(.FILE_NAME("weights_362.hex")) bram2 (
+    bram_16x13602 #(.MODEL_ID(362)) bram2 (
         .clka(clk), .ena(bram_en), .addra(bram_addr), .douta(bram_dout[2])
     );
-    bram_16x13602 #(.FILE_NAME("weights_364.hex")) bram3 (
+    bram_16x13602 #(.MODEL_ID(364)) bram3 (
         .clka(clk), .ena(bram_en), .addra(bram_addr), .douta(bram_dout[3])
     );
-    bram_16x13602 #(.FILE_NAME("weights_370.hex")) bram4 (
+    bram_16x13602 #(.MODEL_ID(370)) bram4 (
         .clka(clk), .ena(bram_en), .addra(bram_addr), .douta(bram_dout[4])
     );
 
@@ -137,6 +138,7 @@ module nn_combined (
     assign h1_out = h1_reg;
     assign h4_out = h4_reg;
     assign done   = done_reg;
+    assign state_out = state;
 
     always_ff @(posedge clk or posedge rst) begin
         if (rst) begin
@@ -160,6 +162,7 @@ module nn_combined (
                         in_idx    <= 0;
                         bram_addr <= BACKBONE0_BIAS_START;
                         state     <= L1_BIAS;
+                        $display("%0t ns: FSM started, model_select=%0d", $time, model_select);
                     end
                 end
 
@@ -275,6 +278,7 @@ module nn_combined (
 
                     if (in_idx == 8'd31) begin
                         h1_reg    <= q8_8_from_acc(sum);
+                        $display("H1 output for model %0d vec current: %0d (sum=%0d, weight=%0d, hidden3[%0d]=%0d)", model_select, q8_8_from_acc(sum), sum, weight, in_idx, hidden3[in_idx]);
                         bram_addr <= HEAD_H4_BIAS_START;
                         state     <= H4_BIAS;
                     end else begin
@@ -309,6 +313,7 @@ module nn_combined (
 
                 DONE: begin
                     done_reg <= 1'b1;
+                    $display("DONE model %0d h1=%0d h4=%0d", model_select, h1_reg, h4_reg);
                     state    <= IDLE;
                 end
 
@@ -320,9 +325,15 @@ module nn_combined (
 endmodule
 
 
-// Simulation-only BRAM
+// BRAM wrapper for Vivado IP instances initialized from .coe files.
+// Expected IP module names:
+// - bram_weights_196
+// - bram_weights_279
+// - bram_weights_362
+// - bram_weights_364
+// - bram_weights_370
 module bram_16x13602 #(
-    parameter FILE_NAME = "weights_196.hex"
+    parameter int MODEL_ID = 196
 )(
     input  logic clka,
     input  logic ena,
@@ -330,17 +341,53 @@ module bram_16x13602 #(
     output logic signed [15:0] douta
 );
 
-    logic signed [15:0] mem [0:13601];
+    logic signed [17:0] douta18;
 
-    initial begin
-        $readmemh(FILE_NAME, mem);
-        $display("Loaded BRAM from %s, first value: %h", FILE_NAME, mem[0]);
-    end
+    // BRAM IP may be generated with 18-bit width (common 9/18/36 option set).
+    // COE values fit in 16 bits, so use low 16 bits for compute path.
+    assign douta = douta18[15:0];
 
-    always_ff @(posedge clka) begin
-        if (ena) begin
-            douta <= mem[addra];
+    generate
+        if (MODEL_ID == 196) begin : g_bram_196
+            bram_weights_196 u_bram (
+                .clka(clka),
+                .ena(ena),
+                .addra(addra),
+                .douta(douta18)
+            );
+        end else if (MODEL_ID == 279) begin : g_bram_279
+            bram_weights_279 u_bram (
+                .clka(clka),
+                .ena(ena),
+                .addra(addra),
+                .douta(douta18)
+            );
+        end else if (MODEL_ID == 362) begin : g_bram_362
+            bram_weights_362 u_bram (
+                .clka(clka),
+                .ena(ena),
+                .addra(addra),
+                .douta(douta18)
+            );
+        end else if (MODEL_ID == 364) begin : g_bram_364
+            bram_weights_364 u_bram (
+                .clka(clka),
+                .ena(ena),
+                .addra(addra),
+                .douta(douta18)
+            );
+        end else if (MODEL_ID == 370) begin : g_bram_370
+            bram_weights_370 u_bram (
+                .clka(clka),
+                .ena(ena),
+                .addra(addra),
+                .douta(douta18)
+            );
+        end else begin : g_bram_invalid
+            always_comb begin
+                douta18 = 18'sd0;
+            end
         end
-    end
+    endgenerate
 
 endmodule
